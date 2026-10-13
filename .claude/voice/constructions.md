@@ -16,7 +16,7 @@ Replace it. A comma for an aside, a colon before a definition or a list, parenth
 
 > Two writers, one record. The second save wins and nobody is told.
 
-En dashes in numeric ranges are fine and are not checked.
+En dashes in numeric ranges are fine and are not checked. So is a dialogue dash, which touches the word on one side only.
 
 ## Negative parallelism (hook)
 

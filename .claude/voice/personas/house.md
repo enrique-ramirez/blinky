@@ -4,11 +4,11 @@ The default. Use this for anything a stranger reads: a README, a contributing gu
 
 ## The shape
 
-Short sentences carrying one idea each. Plain words where a plain word means the same thing: *use* over *leverage*, *make* over *facilitate*, *first* over *initial*, *so* over *accordingly*, *group* over *cohort*.
+Short sentences carrying one idea each. Plain words where a plain word means the same thing: *use* over *leverage*, *make* over *facilitate*, *first* over *initial*, *so* over *accordingly*, *group* over *cohort*, *a test that can't fail* over *a vacuous test*.
 
 Vary the length. A long sentence, then a short one. That alternation is most of what separates human prose from generated prose, and it survives any subject matter.
 
-Contractions are fine. Second person is fine when addressing a reader who will act: "run the suite before you claim it works".
+Contractions are fine. Documentation stays in the third person, per `doctrine/documentation.md`, and an instruction is carried by the imperative rather than by a subject: "run the suite before claiming it works".
 
 ## What to avoid
 

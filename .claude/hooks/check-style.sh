@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Flags the style regressions that are mechanically decidable. Comment *quality* is not,
-# and is not attempted here: the review agents own that. This only catches what a grep can
-# be sure about, so a hit is a real violation rather than a suggestion.
-#
-# Handles two PostToolUse events. Given `tool_input.file_path` it checks that one file.
-# Given `tool_input.command` it works out which files the command wrote and checks those,
-# which is what stops a heredoc or a `sed -i` from walking past every rule here.
+# Runs check-prose.py on what a PostToolUse event wrote: the one file named by
+# `tool_input.file_path`, or the files a `tool_input.command` changed, so a heredoc or a
+# `sed -i` gets the same checks as the edit tools.
 set -uo pipefail
 
 : "${CLAUDE_PROJECT_DIR:=$PWD}"
@@ -15,8 +11,6 @@ read_field() {
   printf '%s' "$payload" | python3 -c "import json,sys; print(json.load(sys.stdin).get('tool_input',{}).get('$1',''))" 2>/dev/null
 }
 
-# Where the shared voice files live. A plugin install has CLAUDE_PLUGIN_ROOT; a copy
-# install puts them under the project's own .claude/.
 # Three layouts: a plugin install, a copy install, and the kit checked out as itself.
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/voice/register.txt" ]; then
   kit_root="$CLAUDE_PLUGIN_ROOT"
@@ -34,12 +28,9 @@ exempt_list="$CLAUDE_PROJECT_DIR/.claude/style-exempt.txt"
 [ -f "$checker" ] || exit 0
 
 exempt() {
-  # Files whose subject is the rules must quote the phrases the rules forbid, so they
-  # cannot be checked by them.
   case "$1" in
     */third_party/*|*/vendor/*|*/sdk/*|*/node_modules/*|*/.git/*|*/dist/*|*/build/*) return 0 ;;
-    *.local.md|*.local.txt|*/_todo/*|*/_temp/*) return 0 ;;
-    */.claude/*|*/CONTRIBUTING.md) return 0 ;;
+    *.local.md|*.local.txt|*/_todo/*|*/_done/*|*/_tmp/*|*/.claude/*) return 0 ;;
     *.lock|*.snap|*.min.js|*.min.css) return 0 ;;
   esac
   if [ -f "$exempt_list" ]; then
@@ -55,56 +46,10 @@ exempt() {
 problems=()
 
 check_file() {
-  local file="$1" label="${1#"$CLAUDE_PROJECT_DIR/"}"
-
-  # Identity and infrastructure detail. Public repositories; placeholders instead. The
-  # patterns are yours and live outside version control, so this file never publishes
-  # the hostnames it exists to keep out.
-  if [ -f "$local_patterns" ]; then
-    local deny allow hits
-    deny=$(grep -vE '^\s*(#|-|$)' "$local_patterns" 2>/dev/null | paste -sd '|' -)
-    # A `-` line allows a match on the same line, so a pattern can name a person and
-    # still let their repository URL through.
-    allow=$(grep -E '^-' "$local_patterns" 2>/dev/null | cut -c2- | paste -sd '|' -)
-    if [ -n "$deny" ]; then
-      hits=$(grep -nIE "$deny" "$file" 2>/dev/null)
-      [ -n "$allow" ] && hits=$(printf '%s' "$hits" | grep -vE "$allow")
-      if [ -n "$hits" ]; then
-        problems+=("$label: identity or infrastructure detail. Use a placeholder.")
-      fi
-    fi
-  fi
-
-  # History. Git holds it.
-  if grep -nIE 'measured on [0-9]|(during|after|in) a review pass|an earlier version|this used to|it used to|used to read|used to be|the first version|learned the hard way|we moved to a' "$file" >/dev/null 2>&1; then
-    problems+=("$label: records history (what something used to be, or a dated measurement). Git holds that; state only what is true now.")
-  fi
-
-  # Markdown paragraphs hard-wrapped near 80 columns. A repository that wraps on purpose
-  # switches this off with a `-hardwrap` line in its local register file.
-  case "$file" in
-    *.md)
-      grep -qxF -- '-hardwrap' "$local_register" 2>/dev/null || \
-      if python3 - "$file" <<'PY' >/dev/null 2>&1
-import re,sys
-lines=open(sys.argv[1],encoding='utf-8',errors='replace').read().split('\n')
-fenced=False; run=0
-for ln in lines:
-    if ln.lstrip().startswith('```'): fenced=not fenced; run=0; continue
-    prose=(not fenced and ln.strip() and not re.match(r'^\s*([|>#\-*+]|\d+\.|\s{4})',ln))
-    run = run+1 if prose and 60<=len(ln)<=92 else 0
-    if run>=3: sys.exit(0)
-sys.exit(1)
-PY
-      then problems+=("$label: looks hard-wrapped near 80 columns. One paragraph is one line; editors wrap.")
-      fi ;;
-  esac
-
-  # Register and constructions. Prose only, so an identifier or a fixture is never checked.
-  local prose
-  prose=$(python3 "$checker" "$file" "$register" "$local_register" 2>/dev/null)
-  if [ -n "$prose" ]; then
-    while IFS= read -r entry; do problems+=("$label: $entry"); done <<< "$prose"
+  local label="${1#"$CLAUDE_PROJECT_DIR/"}" found
+  found=$(python3 "$checker" "$1" "$register" "$local_register" "$local_patterns" 2>/dev/null)
+  if [ -n "$found" ]; then
+    while IFS= read -r entry; do problems+=("$label: $entry"); done <<< "$found"
   fi
 }
 
@@ -117,22 +62,66 @@ else
   command=$(read_field command)
   [ -n "$command" ] || exit 0
   # Only commands that could have written a file are worth the scan below.
-  printf '%s' "$command" | grep -qE '(>|>>|<<|\btee\b|\bsed\b[^|]*-i|\bcp\b|\bmv\b|\binstall\b|\bpatch\b|\bdd\b|\btruncate\b|git +apply|\bpython3?\b|\bnode\b|\bperl\b)' || exit 0
+  printf '%s' "$command" | grep -qE '(>|>>|<<|\btee\b|\bsed\b[^|]*-i|\bcp\b|\bmv\b|\binstall\b|\bpatch\b|\bdd\b|\btruncate\b|git +apply|\bpython3?\b|\bnode\b|\bperl\b|\b(pnpm|npm|npx|yarn|biome|prettier)\b)' || exit 0
 
   git_dir=$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --git-dir 2>/dev/null) || exit 0
   case "$git_dir" in /*) ;; *) git_dir="$CLAUDE_PROJECT_DIR/$git_dir" ;; esac
-  snapshot="$git_dir/style-check-snapshot"
+  # A new snapshot name takes the record-only path below, so a format change never
+  # reports the whole window as changed.
+  snapshot="$git_dir/style-check-snapshot-v2"
 
-  # Checksums rather than timestamps. A command that writes a file within the same
-  # second as the last scan is the normal case, not the rare one, and mtime on this
-  # platform cannot tell those apart.
-  current=$(
-    git -C "$CLAUDE_PROJECT_DIR" status --porcelain --untracked-files=all 2>/dev/null |
-      cut -c4- | head -200 |
-      while IFS= read -r path; do
-        [ -f "$CLAUDE_PROJECT_DIR/$path" ] || continue
-        printf '%s %s\n' "$(cksum < "$CLAUDE_PROJECT_DIR/$path" | cut -d' ' -f1)" "$path"
-      done
+  # Checksums rather than timestamps, because a write within the same second as the last
+  # scan is the normal case. The scan is capped at the most recently written files that
+  # still exist, so a pile of deletions cannot push the triggering write out of the window.
+  current=$(python3 - "$CLAUDE_PROJECT_DIR" <<'PY' 2>/dev/null
+import os, stat, subprocess, sys, zlib
+
+BUDGET = 200
+root = sys.argv[1]
+
+try:
+    porcelain = subprocess.run(
+        ['git', '-C', root, 'status', '--porcelain', '--untracked-files=all', '-z'],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True).stdout
+except (OSError, subprocess.CalledProcessError):
+    sys.exit(0)
+
+# -z rather than the quoted default, so a path with a space or an accent in it arrives
+# intact. Records are NUL-separated; a rename or a copy is followed by a second record
+# holding its source path, which is not a status line and must not be read as one.
+records = porcelain.split(b'\0')
+paths, i = [], 0
+while i < len(records):
+    record, i = records[i], i + 1
+    if len(record) < 4:
+        continue
+    status, path = record[:2], record[3:]
+    if b'R' in status or b'C' in status:
+        i += 1
+    paths.append(os.fsdecode(path))
+
+entries = []
+for path in paths:
+    if '\n' in path:  # would corrupt the one-line-per-file snapshot below
+        continue
+    try:
+        info = os.stat(os.path.join(root, path))
+    except OSError:  # a deletion, or a symlink pointing at one
+        continue
+    if stat.S_ISREG(info.st_mode):
+        entries.append((info.st_mtime, path))
+entries.sort(key=lambda entry: (-entry[0], entry[1]))
+
+for _, path in entries[:BUDGET]:
+    checksum = 0
+    try:
+        with open(os.path.join(root, path), 'rb') as handle:
+            for chunk in iter(lambda: handle.read(65536), b''):
+                checksum = zlib.crc32(chunk, checksum)
+    except OSError:
+        continue
+    print(checksum, path)
+PY
   )
 
   # First run in a checkout only records the snapshot. Reporting every dirty file at
@@ -162,6 +151,6 @@ fi
 {
   echo "Style check:"
   for p in "${problems[@]}"; do echo "  - $p"; done
-  echo "See voice/constructions.md and the contributing guide. Fix it now rather than leaving it for a later pass."
+  echo "See voice/constructions.md and doctrine/documentation.md. Fix it now. A line that must quote a banned phrase gets a \`-regex\` allow line in .claude/style-patterns.local.txt."
 } >&2
 exit 2

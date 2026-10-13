@@ -19,6 +19,13 @@ Near-duplicates are worth as much attention as exact ones. Two date formatters
 with slightly different edge-case behaviour is a bug that will take someone a
 day to find.
 
+Tests are where this slips through most often, because nobody reads a test for
+reuse. A render wrapper, a mock builder, or an object literal spelling out every
+field of an entity is a second copy when the repository already has a shared
+helper or a fixture for it. Find the fixture and name it. A test that states
+only the fields its assertion depends on, and takes the rest from the fixture,
+also says what it is testing.
+
 ## Something should be shared
 
 A third occurrence of the same pattern is usually the point at which it earns a

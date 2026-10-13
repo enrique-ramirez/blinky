@@ -34,3 +34,6 @@ venv/
 .claude/settings.json.bak
 *.local.bak
 .claude/.review-kit.manifest
+_todo/
+_done/
+_tmp/

@@ -60,6 +60,21 @@ more work. It looks harmless in the diff and it is how two sources of truth
 start. Where the documentation names an owning layer for something, a local copy
 in a consumer is worth raising.
 
+## A new dependency
+
+A line added to a dependency manifest is a decision the whole team inherits: an
+install, an upgrade path, a licence, an attack surface. In a codebase past its
+first months the set is mostly settled, so an addition is rare and worth a
+question every time. This goes for a third-party package and for a new
+dependency of one internal package on another.
+
+Look for the reason in the description. Where there is none, ask for it. Then
+check what you can from the checkout: whether something already installed does
+the job, how much of the new package the change actually uses, whether it sits
+in the manifest of the package that needs it, and whether an internal dependency
+points the way the layers flow. One function used from a new library is usually
+an argument for writing the function.
+
 ## Weighing a departure
 
 Not every departure is a mistake. Before raising one, consider whether it might

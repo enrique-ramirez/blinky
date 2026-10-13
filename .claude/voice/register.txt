@@ -173,6 +173,8 @@ when it comes to
 you may want to
 understanding
 alright
+vacuous
+vacuously
 
 # Self-congratulation. A comment calling something obvious is a comment that
 # should have been deleted, or should have been a name.
