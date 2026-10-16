@@ -93,6 +93,12 @@ request itself, and no separate permission covers it.
 `Contents: Read-only` is the load-bearing part: with it, this tool cannot push a
 commit, create a branch, or merge anything, whatever else goes wrong.
 
+One thing the token cannot see is a review request made to a *team*. Resolving a
+team needs the organisation's `Members: Read`, which a repository-scoped token
+does not get. Blinky skips those entries; a request made to you by name still
+counts, so `only_if_review_requested` and the re-review trigger fire when you
+personally are asked, not when your team is. `--check` reports this as optional.
+
 `Commit statuses` and `Actions` are how it sees whether CI is green; see below
 for why it takes two of them. Finish by running `./blinky.sh --check`, which probes
 every permission one at a time and names the exact one behind any failure.

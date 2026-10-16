@@ -64,7 +64,13 @@ def _rest(token: str, api_url: str, path: str) -> tuple[int, Any]:
 
 def _graphql(
     token: str, url: str, inner: str, owner: str, name: str, number: int
-) -> tuple[str, str]:
+) -> tuple[str, list[dict[str, Any]]]:
+    """Run one probe query. Returns a transport error, or the GraphQL errors.
+
+    The errors come back whole rather than as a first message, because the
+    reviewers probe needs their type and path to tell a missing permission from
+    a node the token was never meant to resolve.
+    """
     query = (
         "query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n)"
         f"{{pullRequest(number:$num){{{inner}}}}}}}"
@@ -82,14 +88,28 @@ def _graphql(
         with urllib.request.urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        return "http", f"HTTP {exc.code}"
+        return f"HTTP {exc.code}", []
     except urllib.error.URLError as exc:
-        return "http", str(exc.reason)
+        return str(exc.reason), []
 
-    errors = body.get("errors") or []
-    if errors:
-        return "denied", (errors[0].get("message") or "")[:70]
-    return "ok", ""
+    return "", [e for e in (body.get("errors") or []) if isinstance(e, dict)]
+
+
+def _only_team_reviewers_hidden(errors: list[dict[str, Any]]) -> bool:
+    """Every error is a FORBIDDEN on a requestedReviewer node.
+
+    requestedReviewer is a union of User, Team and Mannequin, and a fine-grained
+    token resolves a Team only with the organisation's Members: Read. Without it
+    GitHub still returns the request list, with that one node nulled, which is
+    exactly how the live snapshot treats it. So this is not a Pull requests
+    permission problem, and it only matters when a review is requested of a team
+    rather than of you.
+    """
+    return bool(errors) and all(
+        e.get("type") == "FORBIDDEN"
+        and (e.get("path") or [None])[-1] == "requestedReviewer"
+        for e in errors
+    )
 
 
 def _check_token_source(token: str) -> None:
@@ -270,27 +290,42 @@ def run(global_cfg: GlobalConfig, cfg: RepoConfig, pr_number: int | None) -> int
             )
             probe.status = "ok" if st == 200 else "denied"
             probe.detail = "" if st == 200 else f"HTTP {st}"
-        else:
-            probe.status, probe.detail = _graphql(
-                global_cfg.token,
-                global_cfg.graphql_url,
-                inner,
-                cfg.owner,
-                cfg.name,
-                pr_number,
+            continue
+        transport, errors = _graphql(
+            global_cfg.token,
+            global_cfg.graphql_url,
+            inner,
+            cfg.owner,
+            cfg.name,
+            pr_number,
+        )
+        if transport:
+            probe.status, probe.detail = "denied", transport
+        elif probe.label == "read requested reviewers" and _only_team_reviewers_hidden(errors):
+            probe.status = "denied"
+            probe.permission = "Organization -> Members: Read (team reviewers)"
+            probe.necessity = OPTIONAL
+            probe.detail = (
+                "review requests made to a team are invisible; a request made "
+                "to you by name still counts"
             )
+        elif errors:
+            probe.status, probe.detail = "denied", (errors[0].get("message") or "")[:70]
+        else:
+            probe.status = "ok"
 
     width = max(len(p.label) for p in probes)
     for probe in probes:
         mark = "ok    " if probe.ok else "DENIED"
-        print(f"  {mark}  {probe.label:{width}}   {probe.permission}")
+        extra = "" if probe.necessity == REQUIRED else "   (optional)"
+        print(f"  {mark}  {probe.label:{width}}   {probe.permission}{extra}")
         if not probe.ok and probe.detail:
             print(f"          {'':{width}}   -> {probe.detail}")
 
     ci_probe = next(p for p in probes if "rollup" in p.label)
 
     # If the rollup is refused, work out whether anything else can tell us
-    # whether CI is green — and how much of CI it actually covers.
+    # whether CI is green, and how much of CI it actually covers.
     ci_source = "rollup" if ci_probe.ok else None
     if not ci_probe.ok:
         print()

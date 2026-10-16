@@ -37,3 +37,6 @@ venv/
 _todo/
 _done/
 _tmp/
+
+# pyenv picks the interpreter per machine; blinky.sh finds one on its own.
+.python-version

@@ -786,6 +786,13 @@ replying and resolving conversations. It also allows submitting an **approving**
 review, which satisfies branch protection. That is deliberate, see
 `approval.mode`, but it is real authority.
 
+A review request made to a *team* is invisible to the token: resolving a team
+takes the organisation's `Members: Read`, which a repository-scoped token does
+not get. GitHub returns the request list with that entry nulled, and blinky
+skips it. A request made to you by name still counts, so `only_if_review_requested`
+and the re-review trigger fire when you personally are asked, not when your team
+is. `--check` reports this as optional rather than as a missing permission.
+
 The token is never placed in the model's environment.
 
 `./blinky.sh --check` probes each of these one at a time and names the exact

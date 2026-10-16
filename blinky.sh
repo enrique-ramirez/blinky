@@ -26,29 +26,51 @@ err()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 
 # ---------------------------------------------------------------- interpreter
 
+new_enough() {
+  "$1" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' 2>/dev/null
+}
+
 # Prefer the project venv when it exists, since that is where Textual lives.
-# Fall back to the system Python, which is all the reviewer itself needs.
+# Otherwise take the first interpreter on PATH that is new enough. Plain
+# `python3` comes first, but on a Mac that is often the 3.9 Apple ships, with a
+# newer one sitting right beside it under its versioned name, or installed by
+# pyenv and selected by a .python-version file in this folder.
 pick_python() {
   if [ -x "$VENV/bin/python3" ]; then
     echo "$VENV/bin/python3"
-  elif command -v python3 >/dev/null 2>&1; then
-    echo "python3"
+    return 0
+  fi
+  local candidate
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11 python3.10; do
+    if command -v "$candidate" >/dev/null 2>&1 && new_enough "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  if command -v pyenv >/dev/null 2>&1; then
+    candidate="$(pyenv which python3 2>/dev/null || true)"
+    if [ -n "$candidate" ] && new_enough "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    err "Python 3.10 or newer is required (found $(python3 -c 'import sys; print(sys.version.split()[0])'))."
+    err "Install one, or point a venv at one you already have:"
+    err "    python3.12 -m venv $VENV"
   else
     err "python3 is not on PATH."
-    exit 1
   fi
+  exit 1
 }
 
 PY="$(pick_python)"
 
-"$PY" - <<'CHECK' || exit 1
-import sys
-if sys.version_info < (3, 10):
-    sys.stderr.write(
-        f"Python 3.10 or newer is required (found {sys.version.split()[0]}).\n"
-    )
-    raise SystemExit(1)
-CHECK
+if ! new_enough "$PY"; then
+  err "$PY is $("$PY" -c 'import sys; print(sys.version.split()[0])'); Python 3.10 or newer is required."
+  err "Recreate the venv with a newer interpreter:  rm -rf $VENV && python3.12 -m venv $VENV"
+  exit 1
+fi
 
 has_textual() { "$1" -c "import textual" >/dev/null 2>&1; }
 
@@ -62,7 +84,7 @@ ensure_textual() {
 
   if [ ! -x "$VENV/bin/python3" ]; then
     dim "Creating $VENV …"
-    if ! python3 -m venv "$VENV" >/dev/null 2>&1; then
+    if ! "$PY" -m venv "$VENV" >/dev/null 2>&1; then
       warn "Could not create a virtual environment (python3-venv missing?)."
       return 1
     fi
