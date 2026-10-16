@@ -20,13 +20,13 @@ SHA, your uncommitted work and local ``.env`` files are not visible to the model
 
 from __future__ import annotations
 
-import fnmatch
+import re
 import shutil
 import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
@@ -187,8 +187,8 @@ def pr_checkout(repo: Path, pr_number: int, head_sha: str) -> Iterator[Checkout]
 def fetch_base_ref(repo: Path, branch: str) -> str:
     """Fetch a branch into ``refs/reviewer/base-*`` and return the ref name.
 
-    Used to read the repository's own agent docs from code that has already
-    been reviewed, rather than from the branch under review.
+    The repository's own agent docs come from here, so they are code that has
+    passed review rather than the branch under review.
     """
     ref = f"{REF_NAMESPACE}/base-{branch.replace('/', '-')}"
     _run(
@@ -205,35 +205,87 @@ def fetch_base_ref(repo: Path, branch: str) -> str:
     return ref
 
 
+@dataclass
+class RepoContext:
+    """What ``read_trusted_files`` managed to read, and what the budget cost."""
+
+    files: dict[str, str] = field(default_factory=dict)
+    truncated: list[str] = field(default_factory=list)
+    dropped: list[str] = field(default_factory=list)
+
+    def __bool__(self) -> bool:
+        return bool(self.files)
+
+    @property
+    def complete(self) -> bool:
+        return not self.truncated and not self.dropped
+
+
+def _glob_regex(pattern: str) -> re.Pattern[str]:
+    """A path glob where ``*`` stays inside one segment and ``**`` crosses them.
+
+    Not fnmatch, whose ``*`` matches ``/``: with that, ``.claude/*.md`` means
+    everything under ``.claude/``, and a repository with a full agent kit feeds
+    dozens of subagent definitions into the budget ahead of its rulebook.
+    """
+    out = ""
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if pattern.startswith("**/", i):
+            out += "(?:.*/)?"
+            i += 3
+        elif pattern.startswith("**", i):
+            out += ".*"
+            i += 2
+        elif ch == "*":
+            out += "[^/]*"
+            i += 1
+        elif ch == "?":
+            out += "[^/]"
+            i += 1
+        else:
+            out += re.escape(ch)
+            i += 1
+    return re.compile(f"^{out}$")
+
+
 def read_trusted_files(
     repo: Path, ref: str, patterns: list[str], max_chars: int
-) -> dict[str, str]:
-    """Read files matching ``patterns`` from ``ref`` without checking anything out."""
+) -> RepoContext:
+    """Read files matching ``patterns`` from ``ref`` without checking anything out.
+
+    Files are read in the order the patterns are listed, so the budget goes to
+    ``AGENTS.md`` before anything a later, broader pattern sweeps up.
+    """
     listing = _run(repo, ["ls-tree", "-r", "--name-only", ref], check=False)
     if listing.returncode != 0:
-        return {}
+        return RepoContext()
 
     paths = [p for p in (listing.stdout or "").splitlines() if p.strip()]
-    matched = [
-        path
-        for path in paths
-        if any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
-    ]
+    matched: list[str] = []
+    for pattern in patterns:
+        regex = _glob_regex(pattern)
+        for path in sorted(paths):
+            if regex.match(path) and path not in matched:
+                matched.append(path)
 
-    out: dict[str, str] = {}
+    context = RepoContext()
     budget = max_chars
-    for path in sorted(matched):
+    for path in matched:
         if budget <= 0:
-            break
+            context.dropped.append(path)
+            continue
         blob = _run(repo, ["show", f"{ref}:{path}"], check=False)
         if blob.returncode != 0:
             continue
         content = blob.stdout or ""
         if len(content) > budget:
             content = content[:budget] + "\n\n[truncated]"
-        out[path] = content
+            context.truncated.append(path)
+        context.files[path] = content
         budget -= len(content)
-    return out
+    return context
 
 
 def resolve_default_branch(repo: Path, fallback: str = "main") -> str:

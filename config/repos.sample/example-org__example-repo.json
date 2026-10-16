@@ -202,11 +202,22 @@
         "has nothing to do with which provider does the reviewing. Trim the list",
         "if your repos only ever use one of them; a repo where CLAUDE.md is a",
         "symlink to AGENTS.md costs a few wasted characters, not a wrong review.",
-        ".claude/skills/** is left out on purpose \u2014 those are workflow skills for",
-        "building in the repo, not for reviewing it."
+        "* stays within one path segment and ** crosses them, so .claude/*.md is",
+        "the top-level docs only. .claude/skills/** is left out on purpose \u2014",
+        "those are workflow skills for building in the repo, not for reviewing it.",
+        "Files are read in this order, so the budget goes to AGENTS.md first.",
+        "./blinky.sh --check lists what matched and what the budget cut."
       ],
-      "max_chars": 20000
+      "max_chars": 60000
     },
+    "other_reviewers": [],
+    "$comment_other_reviewers": [
+      "Accounts of other automated reviewers on this repo, e.g. \"coderabbitai[bot]\".",
+      "Their open threads reach the model as a one-line headline flagged",
+      "'already covered, do not duplicate', and their PR comments are left out,",
+      "so a review neither restates them nor spends its context reading them.",
+      "Humans are never listed here: a colleague's thread is real context."
+    ],
     "max_disagreement_rounds_per_thread": 3,
     "$comment_disagreement": [
       "Counted per thread, not per PR. What is capped here is one thread",

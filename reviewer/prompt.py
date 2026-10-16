@@ -130,6 +130,22 @@ def build_system(
     return "\n\n---\n\n".join(parts)
 
 
+def _headline(body: str) -> str:
+    """The first line of a comment, which is the point; the rest was the argument."""
+    return " ".join(body.strip().splitlines()[0].split())[:160] if body.strip() else ""
+
+
+def _login_key(login: str) -> str:
+    """GraphQL reports a bot as `coderabbitai`, REST as `coderabbitai[bot]`."""
+    return login.strip().lower().removesuffix("[bot]")
+
+
+def is_other_reviewer(login: str, cfg: RepoConfig) -> bool:
+    others = cfg.review.get("other_reviewers") or []
+    key = _login_key(login)
+    return any(_login_key(str(o)) == key for o in others)
+
+
 def _settled_block(threads: list[ReviewThread], identity: str | None) -> str:
     """Points we already made on this pull request and that are now closed."""
     settled = [t for t in threads if t.is_resolved and t.is_ours(identity)]
@@ -139,10 +155,7 @@ def _settled_block(threads: list[ReviewThread], identity: str | None) -> str:
     entries: list[str] = []
     for thread in settled:
         location = f"{thread.path}:{thread.line or thread.original_line or '?'}"
-        first = thread.comments[0].body.strip() if thread.comments else ""
-        # The title line is what identifies the point; the rest was the argument
-        # for it, which is over.
-        headline = " ".join(first.splitlines()[0].split())[:160]
+        headline = _headline(thread.comments[0].body) if thread.comments else ""
         entries.append(f"- {location} — {headline}")
 
     return (
@@ -157,7 +170,9 @@ def _settled_block(threads: list[ReviewThread], identity: str | None) -> str:
     )
 
 
-def _thread_block(threads: list[ReviewThread], identity: str | None) -> str:
+def _thread_block(
+    threads: list[ReviewThread], identity: str | None, cfg: RepoConfig
+) -> str:
     open_threads = [t for t in threads if not t.is_resolved]
     if not open_threads:
         return "No open review threads."
@@ -170,11 +185,23 @@ def _thread_block(threads: list[ReviewThread], identity: str | None) -> str:
             flags.append("outdated: the lines it points at have since changed")
         if thread.is_ours(identity):
             flags.append("started by you")
-        flag_text = f" [{'; '.join(flags)}]" if flags else ""
 
-        conversation = "\n".join(
-            f"  {c.author}: {c.body.strip()}" for c in thread.comments
-        )
+        # Another reviewer's thread means the topic is taken. The model needs to
+        # know that much to avoid repeating it, and nothing more: the full
+        # argument would cost tokens and pull the review towards that
+        # reviewer's opinions.
+        if is_other_reviewer(thread.started_by, cfg):
+            flags.append("raised by another reviewer, already covered, do not duplicate")
+            first = thread.comments[0]
+            conversation = f"  {first.author}: {_headline(first.body)}"
+            if len(thread.comments) > 1:
+                conversation += f"\n  ({len(thread.comments) - 1} more in the thread)"
+        else:
+            conversation = "\n".join(
+                f"  {c.author}: {c.body.strip()}" for c in thread.comments
+            )
+
+        flag_text = f" [{'; '.join(flags)}]" if flags else ""
         entries.append(
             f"- thread_id: {thread.node_id}\n  location: {location}{flag_text}\n{conversation}"
         )
@@ -302,16 +329,25 @@ def build_review_user_prompt(
     if "spec" in axes:
         sections.append(f"## Linked issues\n\n{_issue_block(issues)}")
 
-    if discussion:
+    # Another reviewer's PR-level comments are walkthroughs and summaries, not
+    # context the review needs. Filtered before the cut so that a bot posting on
+    # every push cannot crowd the humans out of the last twenty.
+    people = [
+        c
+        for c in discussion
+        if not is_other_reviewer((c.get("user") or {}).get("login") or "", cfg)
+    ]
+    if people:
         lines = "\n".join(
-            f"- {c.get('user', {}).get('login', 'unknown')}: "
+            f"- {(c.get('user') or {}).get('login') or 'unknown'}: "
             f"{(c.get('body') or '').strip()}"
-            for c in discussion[-20:]
+            for c in people[-20:]
         )
         sections.append(f"## PR conversation\n\n{lines}")
 
     sections.append(
-        f"## Existing review threads\n\n{_thread_block(snapshot.threads, cfg.identity)}"
+        "## Existing review threads\n\n"
+        f"{_thread_block(snapshot.threads, cfg.identity, cfg)}"
     )
 
     settled = _settled_block(snapshot.threads, cfg.identity)

@@ -33,7 +33,7 @@ from . import (
 )
 from .config import DEFAULT_CONTEXT_PATHS, GlobalConfig, RepoConfig
 from .gh import GitHubError, GraphQLClient, RestClient
-from .gh.graphql import PRSnapshot
+from .gh.graphql import PRSnapshot, ReviewThread
 from .log import DebugSink
 from .state import Store
 
@@ -608,6 +608,14 @@ class Reviewer:
 
         comments_only = decision.trigger == "new_comments"
 
+        pending = threads.pending_threads(snapshot, cfg, self.store)
+        if comments_only and not pending:
+            log.get().info(
+                "%s#%s: new comments, none on a thread of ours", cfg.repo, number
+            )
+            self.store.record_comment_scan(cfg.repo, number, newest_comment_id)
+            return False
+
         # From here on this pull request is live work, which can be minutes of
         # it. Marked so the board says so instead of showing the previous pass's
         # outcome the whole time. Cleared in `finally`, because an exception
@@ -637,7 +645,7 @@ class Reviewer:
 
                 repo_context = self._load_repo_context(snapshot.default_branch)
 
-                self._handle_threads(snapshot, checkout_path, repo_context)
+                self._handle_threads(pending, snapshot, checkout_path, repo_context)
 
                 if comments_only:
                     self.store.record_comment_scan(cfg.repo, number, newest_comment_id)
@@ -732,25 +740,34 @@ class Reviewer:
 
         try:
             ref = worktree.fetch_base_ref(self.cfg.local_path, default_branch)
-            files = worktree.read_trusted_files(
+            context = worktree.read_trusted_files(
                 self.cfg.local_path,
                 ref,
                 settings.get("paths") or DEFAULT_CONTEXT_PATHS,
-                int(settings.get("max_chars") or 20000),
+                int(settings.get("max_chars") or 60000),
             )
         except worktree.GitError as exc:
             log.get().warning("%s: could not read repo context: %s", self.cfg.repo, exc)
             self._repo_context = None
             return None
 
-        if files:
+        if context:
             log.get().debug(
                 "%s: repo context from %s — %s",
                 self.cfg.repo,
                 default_branch,
-                ", ".join(files),
+                ", ".join(context.files),
             )
-        self._repo_context = files or None
+        # A conventions file the model never sees is the quietest way for a
+        # review to go wrong, so this is a warning and not a debug line.
+        if not context.complete:
+            log.get().warning(
+                "%s: repo_context.max_chars ran out — truncated: %s; dropped: %s",
+                self.cfg.repo,
+                ", ".join(context.truncated) or "none",
+                ", ".join(context.dropped) or "none",
+            )
+        self._repo_context = context.files or None
         return self._repo_context
 
     def _linked_issues(self, body: str, title: str) -> list[dict[str, Any]]:
@@ -777,11 +794,11 @@ class Reviewer:
 
     def _handle_threads(
         self,
+        pending: list[ReviewThread],
         snapshot: PRSnapshot,
         checkout_path: Path | None,
         repo_context: dict[str, str] | None,
     ) -> None:
-        pending = threads.pending_threads(snapshot, self.cfg, self.store)
         if not pending:
             return
 

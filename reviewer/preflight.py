@@ -21,8 +21,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-from . import identity, providers
-from .config import GlobalConfig, RepoConfig
+from . import identity, providers, worktree
+from .config import DEFAULT_CONTEXT_PATHS, GlobalConfig, RepoConfig
 from .gh.rest import ACCEPT, API_VERSION, USER_AGENT
 
 REQUIRED = "required"
@@ -231,6 +231,45 @@ def environment(global_cfg: GlobalConfig, repos: list[RepoConfig]) -> int:
     return max(_check_account(global_cfg, repos), _check_models(global_cfg, repos))
 
 
+def _check_repo_context(cfg: RepoConfig, default_branch: str) -> None:
+    """Which convention files a review would read, and whether the budget holds.
+
+    A review that reads none of the repository's rulebook still runs and still
+    posts, so this is the place to find out, not the review.
+    """
+    settings = cfg.review.get("repo_context") or {}
+    if not settings.get("enabled", True):
+        print("context: off (repo_context.enabled is false)")
+        return
+    if not cfg.local_path:
+        print("context: none (no local_path, so AGENTS.md and friends are not read)")
+        return
+
+    patterns = settings.get("paths") or DEFAULT_CONTEXT_PATHS
+    max_chars = int(settings.get("max_chars") or 60000)
+    try:
+        ref = worktree.fetch_base_ref(cfg.local_path, default_branch)
+        context = worktree.read_trusted_files(cfg.local_path, ref, patterns, max_chars)
+    except worktree.GitError as exc:
+        print(f"context: could not read from {default_branch} ({exc})")
+        return
+
+    if not context and not context.dropped:
+        print(f"context: nothing on {default_branch} matches {', '.join(patterns)}")
+        return
+
+    total = sum(len(c) for c in context.files.values())
+    print(f"context: {len(context.files)} file(s), {total:,} of {max_chars:,} chars, from {default_branch}")
+    for path, content in context.files.items():
+        tail = "   TRUNCATED" if path in context.truncated else ""
+        print(f"         {len(content):>8,}  {path}{tail}")
+    for path in context.dropped:
+        print(f"         {'dropped':>8}  {path}")
+    if not context.complete:
+        print("         Raise review.repo_context.max_chars or narrow its paths;")
+        print("         whatever is truncated or dropped is not read on review.")
+
+
 def run(global_cfg: GlobalConfig, cfg: RepoConfig, pr_number: int | None) -> int:
     """Probe every capability. Returns a process exit code."""
     print(f"repo   : {cfg.repo}")
@@ -251,7 +290,9 @@ def run(global_cfg: GlobalConfig, cfg: RepoConfig, pr_number: int | None) -> int
     if status != 200:
         print(f"\n  unexpected {status}: {body}")
         return 1
-    print(f"default: {body.get('default_branch')}")
+    default_branch = str(body.get("default_branch") or "main")
+    print(f"default: {default_branch}")
+    _check_repo_context(cfg, default_branch)
 
     # Find a PR to probe against; every GraphQL check needs a real one.
     if pr_number is None:

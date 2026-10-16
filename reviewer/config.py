@@ -143,8 +143,12 @@ REPO_DEFAULTS: dict[str, Any] = {
             "enabled": True,
             "from_ref": "default_branch",
             "paths": list(DEFAULT_CONTEXT_PATHS),
-            "max_chars": 20000,
+            "max_chars": 60000,
         },
+        # Accounts of other automated reviewers on the repository, such as
+        # "coderabbitai[bot]". Their open threads reach the model as a headline
+        # with a do-not-duplicate flag, and their PR comments are left out.
+        "other_reviewers": [],
         "max_disagreement_rounds_per_thread": 3,
         # What a *repeat* review of the same pull request is allowed to do.
         # Without these, every push buys a fresh full review with no memory of

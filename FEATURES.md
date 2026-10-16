@@ -402,6 +402,17 @@ says what was not read:
 The total is measured *after* the first two tiers, so a PR that is +10,000 lines
 of snapshot and +900 lines of real code counts as 900.
 
+Open review threads and the last twenty PR comments go along with the diff. On a
+repository where other bots already review every push, most of that is their
+output: long, opinionated and no business of this review. List their accounts in
+`review.other_reviewers` and each of their open threads arrives as one headline
+flagged *raised by another reviewer, already covered, do not duplicate*, with its
+thread id kept so resolution still works, while their PR comments are left out
+before the cut, so a bot posting on every push cannot crowd the humans out of
+the twenty. A colleague's thread is real context and is sent whole; only the
+listed accounts collapse. This never makes the reviewer reply on a thread it did
+not start.
+
 ## Review outcomes
 
 | Findings | Review submitted | Merge button |
@@ -523,7 +534,13 @@ Three layers, in order of how specific they are:
    codebase's layering, package boundaries and "the most common mistake is X"
    should live, because the team maintains it and it stays current without anyone
    remembering to update a second copy. The reviewer treats departures from it as
-   findings and quotes it when raising one.
+   findings and quotes it when raising one. In `repo_context.paths`, `*` stays
+   within one path segment and `**` crosses them, so the default `.claude/*.md`
+   means the top-level docs there, not every subagent definition beneath. Files
+   are read in the order the patterns are listed, so `AGENTS.md` gets the budget
+   first; `./blinky.sh --check` prints what matched and anything `max_chars`
+   truncated or dropped, since a rulebook the model never sees is the quietest
+   way for a review to go wrong.
 3. **`config/repos/<name>.md`**: optional notes for one repository, sitting next
    to its JSON config. Picked up automatically; no config key. For things that
    belong to you rather than the team.
