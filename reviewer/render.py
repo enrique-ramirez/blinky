@@ -90,8 +90,9 @@ def parse_findings(payload: dict[str, Any]) -> list[Finding]:
     return sorted(findings, key=lambda f: (f.rank, f.path, f.line or 0))
 
 
-def marker(head_sha: str) -> str:
-    return f"{MARKER_PREFIX}:v1:{head_sha[:12]} -->"
+def marker(head_sha: str, kind: str = "review") -> str:
+    suffix = "" if kind == "review" else f":{kind}"
+    return f"{MARKER_PREFIX}:v1:{head_sha[:12]}{suffix} -->"
 
 
 def is_ours(body: str) -> bool:
@@ -187,6 +188,7 @@ def summary_body(
     coverage_note: str,
     invite_wave_off: bool,
     manual_reason: str = "",
+    waiting_reason: str = "",
     language_note: str = "",
     provider: str = "",
 ) -> str:
@@ -217,6 +219,14 @@ def summary_body(
             f"_Holding off on approving this one for a human to look at: {manual_reason}._",
         ]
 
+    if waiting_reason:
+        parts += [
+            "",
+            f"_Not approving yet: {waiting_reason}. I will approve once every open "
+            "thread has a reply or a fix that holds up, or is resolved; no need to "
+            "push or re-request a review for that._",
+        ]
+
     block = agent_block(findings, language_note)
     if block:
         parts += ["", block]
@@ -236,6 +246,18 @@ def approval_body(
     if coverage_note:
         parts += ["", f"<sub>Coverage: {coverage_note}</sub>"]
     return "\n".join(parts)
+
+
+def approval_after_hold_body(head_sha: str, provider: str = "") -> str:
+    return "\n".join(
+        [
+            marker(head_sha, "approval"),
+            _byline(provider),
+            "",
+            "Approving. The review threads this was waiting on have been "
+            "answered or resolved.",
+        ]
+    )
 
 
 def thread_reply_body(text: str, *, resolving: bool) -> str:

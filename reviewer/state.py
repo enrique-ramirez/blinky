@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS pr_state (
     last_seen_comment_id    INTEGER,
     last_comment_scan_at    REAL,
     review_round            INTEGER NOT NULL DEFAULT 0,
+    hold_fingerprint        TEXT,
     PRIMARY KEY (repo, pr_number)
 );
 
@@ -50,6 +51,9 @@ CREATE TABLE IF NOT EXISTS thread_state (
     capped               INTEGER NOT NULL DEFAULT 0,
     last_seen_comment_id TEXT,
     updated_at           REAL,
+    verdict              TEXT,
+    verdict_comment_id   TEXT,
+    verdict_head_sha     TEXT,
     PRIMARY KEY (repo, pr_number, thread_id)
 );
 
@@ -253,6 +257,7 @@ class PRState:
     last_seen_comment_id: int | None = None
     last_comment_scan_at: float | None = None
     review_round: int = 0
+    hold_fingerprint: str | None = None
 
 
 LEGACY_STATE_DIR_NAME = "pr-reviewer"
@@ -365,6 +370,12 @@ class Store:
     # brings in whole new tables but says nothing about new columns on an
     # existing one, so those are listed here and added on open.
     ADDED_COLUMNS: dict[str, dict[str, str]] = {
+        "pr_state": {"hold_fingerprint": "TEXT"},
+        "thread_state": {
+            "verdict": "TEXT",
+            "verdict_comment_id": "TEXT",
+            "verdict_head_sha": "TEXT",
+        },
         "pr_view": {
             "reviews": "TEXT",
             "requested_reviewers": "TEXT",
@@ -463,6 +474,7 @@ class Store:
             last_seen_comment_id=row["last_seen_comment_id"],
             last_comment_scan_at=row["last_comment_scan_at"],
             review_round=row["review_round"] or 0,
+            hold_fingerprint=row["hold_fingerprint"],
         )
 
     def record_review(
@@ -481,6 +493,36 @@ class Store:
                 review_round           = excluded.review_round
             """,
             (repo, pr_number, head_sha, time.time(), action, current.review_round + 1),
+        )
+        self.conn.commit()
+
+    def set_hold(self, repo: str, pr_number: int, fingerprint: str | None) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO pr_state (repo, pr_number, hold_fingerprint)
+            VALUES (?, ?, ?)
+            ON CONFLICT(repo, pr_number) DO UPDATE SET
+                hold_fingerprint = excluded.hold_fingerprint
+            """,
+            (repo, pr_number, fingerprint),
+        )
+        self.conn.commit()
+
+    def record_approval_after_hold(
+        self, repo: str, pr_number: int, head_sha: str
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO pr_state (repo, pr_number, last_reviewed_head_sha,
+                                  last_reviewed_at, last_review_action)
+            VALUES (?, ?, ?, ?, 'APPROVE')
+            ON CONFLICT(repo, pr_number) DO UPDATE SET
+                last_reviewed_head_sha = excluded.last_reviewed_head_sha,
+                last_reviewed_at       = excluded.last_reviewed_at,
+                last_review_action     = excluded.last_review_action,
+                hold_fingerprint       = NULL
+            """,
+            (repo, pr_number, head_sha, time.time()),
         )
         self.conn.commit()
 
@@ -564,6 +606,46 @@ class Store:
             (repo, pr_number, thread_id),
         ).fetchone()
         return row["last_seen_comment_id"] if row else None
+
+    def thread_verdict(
+        self, repo: str, pr_number: int, thread_id: str
+    ) -> tuple[str, str, str] | None:
+        row = self.conn.execute(
+            "SELECT verdict, verdict_comment_id, verdict_head_sha FROM thread_state "
+            "WHERE repo = ? AND pr_number = ? AND thread_id = ?",
+            (repo, pr_number, thread_id),
+        ).fetchone()
+        if row is None or not row["verdict"]:
+            return None
+        return (
+            str(row["verdict"]),
+            str(row["verdict_comment_id"] or ""),
+            str(row["verdict_head_sha"] or ""),
+        )
+
+    def record_thread_verdict(
+        self,
+        repo: str,
+        pr_number: int,
+        thread_id: str,
+        verdict: str,
+        comment_id: str,
+        head_sha: str,
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO thread_state (repo, pr_number, thread_id, verdict,
+                                      verdict_comment_id, verdict_head_sha, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(repo, pr_number, thread_id) DO UPDATE SET
+                verdict            = excluded.verdict,
+                verdict_comment_id = excluded.verdict_comment_id,
+                verdict_head_sha   = excluded.verdict_head_sha,
+                updated_at         = excluded.updated_at
+            """,
+            (repo, pr_number, thread_id, verdict, comment_id, head_sha, time.time()),
+        )
+        self.conn.commit()
 
     @staticmethod
     def _repo_filter(repos: list[str] | None) -> tuple[str, list[Any]]:

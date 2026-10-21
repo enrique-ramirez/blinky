@@ -431,3 +431,60 @@ def build_thread_user_prompt(
         "do with this thread. Reply with a single JSON object matching the "
         "thread-response contract. Reply with the JSON object only."
     )
+
+
+def build_answer_check_prompt(
+    *,
+    cfg: RepoConfig,
+    snapshot: PRSnapshot,
+    thread: ReviewThread,
+    checkout_path: Path | None,
+) -> str:
+    conversation = "\n\n".join(
+        f"**{c.author}** wrote:\n{c.body.strip()}" for c in thread.comments
+    )
+    location = f"{thread.path}:{thread.line or thread.original_line or '?'}"
+
+    access = ""
+    if checkout_path is not None:
+        access = (
+            f"\n\nA checkout of the PR's head commit is at `{checkout_path}`. Read "
+            "the code before you decide. A claim you cannot point at a file and "
+            "line for is a claim you have not checked."
+        )
+
+    if thread.replied_by(snapshot.author):
+        heading = "Another reviewer's thread, and the author's reply to it"
+        task = (
+            "Check the author's reply against the code. The point is settled when "
+            "the code now does what was asked, or when the author's reason for "
+            "leaving it as it is holds up. "
+        )
+    else:
+        heading = "Another reviewer's thread, outdated by a push with no reply"
+        task = (
+            "The author has not replied here; instead the lines the thread pointed "
+            "at have changed since it was opened. Check the code against what was "
+            "asked. With no reply there is no reason for leaving it to weigh: the "
+            "point is settled only when the code now does what was asked. "
+        )
+
+    return (
+        f"## {heading}\n\n"
+        f"Repository: {cfg.repo}\n"
+        f"PR: #{snapshot.number} — {snapshot.title}\n"
+        f"Author of the pull request: @{snapshot.author}\n"
+        f"Location: {location}\n"
+        f"Thread status: {'outdated (the lines have since changed)' if thread.is_outdated else 'current'}\n\n"
+        "## The conversation so far\n\n"
+        f"{conversation}"
+        f"{access}\n\n"
+        "## Your task\n\n"
+        "This thread is not yours, and nothing you write here is posted to it. "
+        "You are deciding whether the pull request can be approved while the "
+        "thread is still open. An open thread holds the approval back until the "
+        "author has answered the point; whether they have is the question.\n\n"
+        f"{task}"
+        "Whoever raised it does not need to have agreed. Reply with a single JSON "
+        "object matching the answer-check contract. Reply with the JSON object only."
+    )

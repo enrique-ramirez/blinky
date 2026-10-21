@@ -285,6 +285,15 @@
       "'approve_with_notes' \u2014 approve immediately, nits attached as comments.",
       "'comment_only' \u2014 post findings, say nothing about approving."
     ],
+    "wait_for_open_threads": true,
+    "$comment_wait_for_open_threads": [
+      "A clean review does not approve while somebody else's review thread is",
+      "open with no answer from the author: another bot's, a colleague's. A reply",
+      "in the thread, or a push that outdated it, is checked against the code,",
+      "and an answer that holds up clears the thread whether or not whoever",
+      "raised it has agreed. The approval then follows on the next pass without",
+      "a push or a re-request."
+    ],
     "manual_only_when": {
       "$comment": "Conditions that force a human approval even in auto mode. Empty/null values disable a condition.",
       "changed_lines_over": null,

@@ -22,6 +22,7 @@ from . import (
     log,
     model,
     notify,
+    outstanding,
     prompt,
     publish,
     render,
@@ -609,7 +610,8 @@ class Reviewer:
         comments_only = decision.trigger == "new_comments"
 
         pending = threads.pending_threads(snapshot, cfg, self.store)
-        if comments_only and not pending:
+        hold_moved = outstanding.hold_changed(snapshot, cfg, pr_state)
+        if comments_only and not pending and not hold_moved:
             log.get().info(
                 "%s#%s: new comments, none on a thread of ours", cfg.repo, number
             )
@@ -648,8 +650,11 @@ class Reviewer:
                 self._handle_threads(pending, snapshot, checkout_path, repo_context)
 
                 if comments_only:
+                    lifted = hold_moved and self._revisit_hold(
+                        snapshot, checkout_path, repo_context
+                    )
                     self.store.record_comment_scan(cfg.repo, number, newest_comment_id)
-                    return True
+                    return bool(pending or lifted)
 
                 # GitHub drops us from the requested-reviewer list the moment we
                 # submit a review, so honouring a re-review request here cannot loop.
@@ -704,6 +709,9 @@ class Reviewer:
         newest_comment_id: int | None,
     ) -> bool:
         """New PR comments, or a reply on one of our threads we have not answered."""
+        if outstanding.hold_changed(snapshot, self.cfg, pr_state):
+            return True
+
         if newest_comment_id is not None:
             if pr_state.last_seen_comment_id is None:
                 if pr_state.last_reviewed_head_sha is not None:
@@ -916,6 +924,11 @@ class Reviewer:
                 number,
                 (since_sha or "")[:8],
             )
+            # A base-branch merge moves the head without changing the pull request;
+            # a held approval would otherwise be stranded on it.
+            pr_state = self.store.get_pr(cfg.repo, number)
+            if outstanding.hold_changed(snapshot, cfg, pr_state):
+                return self._revisit_hold(snapshot, checkout_path, repo_context)
             return False
 
         bundle = diff.build(files, cfg.diff)
@@ -1021,6 +1034,8 @@ class Reviewer:
             summary_text=summary_text,
             spend=spend,
             allow_repost=allow_repost,
+            checkout_path=checkout_path,
+            repo_context=repo_context,
         )
 
     def _call_model(
@@ -1138,7 +1153,7 @@ class Reviewer:
             )
             return True
 
-        wanted = render.marker(head_sha)
+        wanted = render.marker(head_sha, kind)
         if any(wanted in (row.get("body") or "") for row in reviews):
             log.get().info(
                 "%s#%s: a review for %s reached GitHub before the last run died; "
@@ -1162,6 +1177,8 @@ class Reviewer:
         summary_text: str,
         spend: model.Spend | None = None,
         allow_repost: bool = False,
+        checkout_path: Path | None = None,
+        repo_context: dict[str, str] | None = None,
     ) -> bool:
         cfg = self.cfg
         number = snapshot.number
@@ -1177,12 +1194,14 @@ class Reviewer:
             if needs_human:
                 event = publish.EVENT_COMMENT
                 manual_reason = reason
-                if notify.should_notify(cfg.notify_on, "manual_approval_needed"):
-                    notify.send(
-                        self.global_cfg.notifications,
-                        "Approval waiting on you",
-                        f"{cfg.repo}#{number} is clean but held: {reason}",
-                    )
+                self._notify_manual_hold(number, reason)
+
+        hold = outstanding.Hold("")
+        if event == publish.EVENT_APPROVE:
+            hold = self._hold_reason(snapshot, checkout_path, repo_context, spend)
+            if hold:
+                event = publish.EVENT_COMMENT
+        waiting_reason = hold.reason
 
         placed = publish.place_comments(findings, bundle)
         blockers = sum(1 for f in findings if f.severity == "blocker")
@@ -1206,6 +1225,7 @@ class Reviewer:
                 coverage_note=coverage,
                 invite_wave_off=invite,
                 manual_reason=manual_reason,
+                waiting_reason=waiting_reason,
                 provider=provider,
             )
             body += publish.unplaceable_section(placed.unplaceable)
@@ -1237,6 +1257,7 @@ class Reviewer:
             # is free. The live database never sees it.
             self.store.finish_post(cfg.repo, number, head_sha, "review")
             self.store.record_review(cfg.repo, number, head_sha, f"DRY-RUN:{event}")
+            self._remember_hold(snapshot, hold)
             self._log_review_event(
                 number,
                 head_sha,
@@ -1264,6 +1285,7 @@ class Reviewer:
 
         self.store.finish_post(cfg.repo, number, head_sha, "review")
         self.store.record_review(cfg.repo, number, head_sha, event)
+        self._remember_hold(snapshot, hold)
         self._log_review_event(
             number, head_sha, event, findings, blockers, placed, summary_text, spend
         )
@@ -1284,6 +1306,8 @@ class Reviewer:
             summary += f", {blockers} blocker(s)"
         if manual_reason:
             summary += f" · held: {manual_reason}"
+        if waiting_reason:
+            summary += f" · waiting: {waiting_reason}"
         self.store.set_pr_action(cfg.repo, number, summary)
 
         log.get().info(
@@ -1314,4 +1338,115 @@ class Reviewer:
                 self.global_cfg.notifications, "Review posted", f"{cfg.repo}#{number}"
             )
 
+        return True
+
+    def _hold_reason(
+        self,
+        snapshot: PRSnapshot,
+        checkout_path: Path | None,
+        repo_context: dict[str, str] | None,
+        spend: model.Spend | None,
+    ) -> outstanding.Hold:
+        return outstanding.hold_reason(
+            snapshot=snapshot,
+            cfg=self.cfg,
+            global_cfg=self.global_cfg,
+            store=self.store,
+            checkout_path=checkout_path,
+            personality_dir=self.personality_dir,
+            repo_context=repo_context,
+            debug=self.debug,
+            spend=spend,
+        )
+
+    def _notify_manual_hold(self, number: int, reason: str) -> None:
+        if notify.should_notify(self.cfg.notify_on, "manual_approval_needed"):
+            notify.send(
+                self.global_cfg.notifications,
+                "Approval waiting on you",
+                f"{self.cfg.repo}#{number} is clean but held: {reason}",
+            )
+
+    def _remember_hold(self, snapshot: PRSnapshot, hold: outstanding.Hold) -> None:
+        if not hold:
+            fingerprint = None
+        elif hold.retry:
+            fingerprint = outstanding.UNCHECKED_HOLD
+        else:
+            fingerprint = outstanding.fingerprint(snapshot, self.cfg)
+        self.store.set_hold(self.cfg.repo, snapshot.number, fingerprint)
+
+    def _revisit_hold(
+        self,
+        snapshot: PRSnapshot,
+        checkout_path: Path | None,
+        repo_context: dict[str, str] | None,
+    ) -> bool:
+        cfg = self.cfg
+        number = snapshot.number
+        head_sha = snapshot.head_sha
+
+        needs_human, manual_reason = gates.needs_manual_approval(
+            snapshot, cfg, self._changed_paths(number)
+        )
+        if needs_human:
+            self.store.set_hold(cfg.repo, number, None)
+            self.store.set_pr_action(cfg.repo, number, f"COMMENT — held: {manual_reason}")
+            log.get().info("%s#%s: clean but held: %s", cfg.repo, number, manual_reason)
+            self._notify_manual_hold(number, manual_reason)
+            return False
+
+        spend = model.Spend()
+        hold = self._hold_reason(snapshot, checkout_path, repo_context, spend)
+        if hold:
+            self._remember_hold(snapshot, hold)
+            self.store.set_pr_action(cfg.repo, number, f"COMMENT — waiting: {hold.reason}")
+            log.get().info("%s#%s: still waiting — %s", cfg.repo, number, hold.reason)
+            return False
+
+        if self._already_posted(number, head_sha, "approval"):
+            return False
+        self.store.begin_post(cfg.repo, number, head_sha, "approval")
+
+        body = render.approval_after_hold_body(head_sha, spend.provider)
+        placed = publish.PlacedComments()
+
+        if self.dry_run:
+            log.get().info(
+                "[dry-run] %s#%s would approve now that the threads it waited on are settled",
+                cfg.repo,
+                number,
+            )
+            self.debug.write(cfg.repo, number, "dry-run-approval.md", body)
+            self.store.finish_post(cfg.repo, number, head_sha, "approval")
+            self.store.record_approval_after_hold(cfg.repo, number, head_sha)
+            self._log_review_event(
+                number, head_sha, "DRY-RUN:APPROVE", [], 0, placed, "", spend
+            )
+            return True
+
+        ok = publish.submit_review(
+            self.rest,
+            cfg,
+            number,
+            head_sha,
+            event=publish.EVENT_APPROVE,
+            body=body,
+            comments=[],
+        )
+        if not ok:
+            self.store.abandon_post(cfg.repo, number, head_sha, "approval")
+            return False
+
+        self.store.finish_post(cfg.repo, number, head_sha, "approval")
+        self.store.record_approval_after_hold(cfg.repo, number, head_sha)
+        self._log_review_event(number, head_sha, "APPROVE", [], 0, placed, "", spend)
+        self.store.set_pr_action(cfg.repo, number, "APPROVE — 0 finding(s)")
+        log.get().info(
+            "%s#%s: approved; the threads it was waiting on are settled", cfg.repo, number
+        )
+        if notify.should_notify(cfg.notify_on, "approved"):
+            notify.send(
+                self.global_cfg.notifications, "PR approved", f"{cfg.repo}#{number}"
+            )
         return True

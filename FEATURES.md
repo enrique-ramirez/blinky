@@ -411,7 +411,7 @@ thread id kept so resolution still works, while their PR comments are left out
 before the cut, so a bot posting on every push cannot crowd the humans out of
 the twenty. A colleague's thread is real context and is sent whole; only the
 listed accounts collapse. This never makes the reviewer reply on a thread it did
-not start.
+not start. It does make an approval wait on their open threads; see [Other people's threads](#other-peoples-threads).
 
 ## Review outcomes
 
@@ -419,7 +419,7 @@ not start.
 |---|---|---|
 | A blocker | `REQUEST_CHANGES` | blocked |
 | Nits or correctness only | `COMMENT`, with an offer to approve as-is if you would rather not take them | still needs an approval |
-| Nothing | `APPROVE` | unblocked |
+| Nothing | `APPROVE`, unless somebody else's thread is still waiting on the author (below) | unblocked |
 
 Resolving a conversation does not by itself unblock merging. a
 `REQUEST_CHANGES` review blocks until the same reviewer submits a new one. The
@@ -451,6 +451,16 @@ cut wherever the pane ends, which is how you end up reading "? needs your".
 When a thread goes back and forth past
 `review.max_disagreement_rounds_per_thread`, that one thread goes quiet and you
 get a notification, and every other thread carries on.
+
+### Other people's threads
+
+A clean review does not approve while somebody else's review thread is open with no answer from the author: neither a reply in the thread nor a push that changed the lines it points at. That covers the accounts in `review.other_reviewers` and a colleague alike: an approval says the change is ready, and an open thread nobody has answered says somebody thinks it is not. The review goes up as a `COMMENT` with one line naming the waiting threads by location, and nothing is posted on the threads themselves.
+
+The wait is on the author, not on whoever raised the point. Once the author has answered, the answer is checked against the code the way a reply on one of our own threads is: either the code now does what was asked, or the reason given for leaving it holds up. A push with no reply is an answer too, one only the code can vouch for: a thread that went outdated is checked against the checkout, and clears when the code now does what was asked. An answer that holds up clears the thread whether or not the other reviewer has come back to agree, which is what makes this workable on a repository where a bot opens six threads a push and resolves none of them. One that does not hold up keeps the hold, and the summary says which thread.
+
+The approval then follows without a push or a re-request. A reply landing on one of those threads, or the thread being resolved, counts as new activity; the next pass re-checks what the hold was waiting on and posts the `APPROVE` on the same commit. That is not a review round: nothing new was read, so the severity bar does not move. The manual-approval rules are checked again first: a label added while the hold waited stops the approval, drops the hold, and shows on the board as held for a person.
+
+One model call per answer per commit, on the thread provider, and the verdict is kept, so the same answer against the same code is never checked twice. While anything is still unanswered nothing is checked at all, since the approval waits regardless. A check whose model call fails is not a verdict: the summary says the answer could not be checked on this pass, and every pass retries until one goes through. Off with `approval.wait_for_open_threads: false`.
 
 ## Coming back to the same pull request
 

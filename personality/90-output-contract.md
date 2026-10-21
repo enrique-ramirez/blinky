@@ -73,3 +73,19 @@ set
 - **`reply`**: what gets posted to the thread, written per `06-voice-human.md`.
   Own a mistake in one line. Disagree by pointing at code. Where you cannot tell,
   ask one specific question.
+
+## Checking whether the author has answered another reviewer's point
+
+```json
+{
+  "verdict": "addressed | not_addressed | cannot_tell",
+  "evidence": "string"
+}
+```
+
+- **`verdict`**: `addressed` when the code now does what was asked, or the author's reason for leaving it holds up against the code. `not_addressed` when the point still stands. `cannot_tell` when the code cannot settle it.
+- **`evidence`**: the file, line, and what it showed. Required for `addressed`: an answer accepted with an empty `evidence` field counts as `cannot_tell`, and the approval keeps waiting.
+
+When the author pushed without replying and the push outdated the thread, only the code can settle it: `addressed` means the code now does what was asked, and there is no reason for leaving it to weigh.
+
+Nothing from this reply is posted anywhere. It decides whether an approval waits, and that is all.

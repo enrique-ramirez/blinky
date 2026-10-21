@@ -188,6 +188,9 @@ class ReviewThread:
     def is_ours(self, identity: str | None) -> bool:
         return bool(identity) and self.started_by.lower() == (identity or "").lower()
 
+    def replied_by(self, login: str) -> bool:
+        return any(c.author.lower() == login.lower() for c in self.comments)
+
     def awaiting_us(self, identity: str | None) -> bool:
         """True when someone else had the last word on a thread we started."""
         last = self.last_comment

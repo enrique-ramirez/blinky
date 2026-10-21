@@ -165,6 +165,7 @@ REPO_DEFAULTS: dict[str, Any] = {
     "approval": {
         "mode": "manual",
         "no_blocker_action": "comment_and_invite",
+        "wait_for_open_threads": True,
         "manual_only_when": {
             "changed_lines_over": None,
             "touches_paths": [],
