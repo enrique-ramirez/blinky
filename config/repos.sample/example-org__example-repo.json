@@ -59,6 +59,20 @@
     "model": null,
     "timeout_seconds": null
   },
+  "tracker": {
+    "$comment": [
+      "Where the ticket a pull request answers to lives, for the 'spec' axis.",
+      "'github' (the default), 'clickup', 'jira' or 'none'. ClickUp and Jira",
+      "need their token in .env; see config/.env.sample. 'patterns' replaces",
+      "the type's defaults with your own regexes, one capture group each.",
+      "FEATURES.md, 'Where the ticket lives', has the details and an example."
+    ],
+    "type": "github",
+    "patterns": [],
+    "token_env": null,
+    "base_url": null,
+    "max_tickets": 3
+  },
   "gates": {
     "$comment": "A PR is reviewed when every enabled gate passes. Set any to false to switch it off for this repo.",
     "skip_drafts": true,

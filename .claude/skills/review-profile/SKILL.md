@@ -19,6 +19,7 @@ If the kit is not installed yet, run `<kit>/bin/install.sh <this-repo> --mode pl
 | Doc comments | whether a linter or convention requires a docstring |
 | Documentation map | the markdown files that exist, and what each holds today |
 | Where an external fact belongs | the document already holding facts about outside systems, for a fact governing more than one file |
+| Where a dependency's source lives | the installed-packages directory, any vendored directory, internal packages in the workspace, and the lockfile |
 | Commands | `package.json` scripts, the Makefile, CI. Targeted forms, with their cost |
 | What cannot be verified here | platform-specific sources, hardware, live services; for a page, what jsdom cannot see |
 | User interface | the test runner's config and setup file, the render helper the tests share, the lint config's import rules, the tokens or theme file, the locale folder, the screen or design file the look follows |

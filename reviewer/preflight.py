@@ -21,8 +21,9 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-from . import identity, providers, worktree
+from . import identity, providers, tracker, worktree
 from .config import DEFAULT_CONTEXT_PATHS, GlobalConfig, RepoConfig
+from .gh import GitHubError
 from .gh.rest import ACCEPT, API_VERSION, USER_AGENT
 
 REQUIRED = "required"
@@ -270,6 +271,57 @@ def _check_repo_context(cfg: RepoConfig, default_branch: str) -> None:
         print("         whatever is truncated or dropped is not read on review.")
 
 
+def _check_tracker(global_cfg: GlobalConfig, cfg: RepoConfig, pr_number: int) -> None:
+    if "spec" not in (cfg.review.get("axes") or []):
+        print("tracker: unused (the spec axis is off)")
+        return
+
+    def get_issue(number: int) -> dict[str, Any] | None:
+        path = f"/repos/{cfg.repo}/issues/{number}"
+        status, body = _rest(global_cfg.token, global_cfg.api_url, path)
+        if status == 404:
+            return None
+        if status != 200 or not isinstance(body, dict):
+            raise GitHubError(status, str(body), path)
+        return body
+
+    finder = tracker.build(cfg, get_issue=get_issue)
+    try:
+        who = finder.probe()
+    except tracker.TrackerError as exc:
+        print(f"tracker: {finder.label} · {exc}, so no ticket is read")
+        return
+    token_note = f" · {finder.token_var} from .env" if finder.token_var else ""
+    print(f"tracker: {finder.label}{token_note} · {who}")
+
+    status, pull = _rest(
+        global_cfg.token, global_cfg.api_url, f"/repos/{cfg.repo}/pulls/{pr_number}"
+    )
+    if status != 200 or not isinstance(pull, dict):
+        return
+    head = pull.get("head") if isinstance(pull.get("head"), dict) else {}
+    try:
+        resolved = finder.resolve(
+            title=str(pull.get("title") or ""),
+            branch=str((head or {}).get("ref") or ""),
+            body=str(pull.get("body") or ""),
+        )
+    except tracker.TrackerError as exc:
+        print(f"         PR #{pr_number}: {exc}")
+        return
+    if not resolved:
+        print(
+            f"         PR #{pr_number}: no {finder.label} referenced in the "
+            "title, branch or description"
+        )
+    for item in resolved:
+        if item.ticket is None:
+            print(f"         PR #{pr_number} -> {item.key}: {item.note}")
+            continue
+        state = f" ({item.ticket.status})" if item.ticket.status else ""
+        print(f'         PR #{pr_number} -> {item.ticket.key} "{item.ticket.title[:60]}"{state}')
+
+
 def run(global_cfg: GlobalConfig, cfg: RepoConfig, pr_number: int | None) -> int:
     """Probe every capability. Returns a process exit code."""
     print(f"repo   : {cfg.repo}")
@@ -304,7 +356,9 @@ def run(global_cfg: GlobalConfig, cfg: RepoConfig, pr_number: int | None) -> int
     if pr_number is None:
         print("\n  no pull request found to probe against; open one or pass --pr N")
         return 1
-    print(f"probing: PR #{pr_number}\n")
+    print(f"probing: PR #{pr_number}")
+    _check_tracker(global_cfg, cfg, pr_number)
+    print()
 
     probes = [
         Probe("read pull requests", "Pull requests: Read", REQUIRED),

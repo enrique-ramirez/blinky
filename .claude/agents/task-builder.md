@@ -25,6 +25,8 @@ The test states the promise. Where it looks wrong, say so and stop; that is ofte
 
 Make the test pass with the smallest change that is honestly correct. A special case that satisfies the assertion and nothing around it will be caught.
 
+Where the change deletes or renames a file, a route, an identifier, a constant or a mechanism, grep every documentation file in the repository for its name and for the words that describe it. Fix each sentence inside your file scope; list the rest in the report.
+
 Run the governing test and the tests covering code you edited, with the narrowest selector there is. Mid-spec the full suite is red for reasons that are not yours; it runs once, under `change-auditor`. Where the profile says a filter saves nothing, run what it says.
 
 Three failing runs of the same case without a written hypothesis: stop and report what it expects, what it got, and what you tried. A case that fails every time alone is not a flake.
@@ -56,3 +58,4 @@ A short list:
 4. Where the brief was wrong.
 5. Anything you stopped on, with the readings you could not choose between.
 6. Anything you noticed and left alone.
+7. Documentation outside your scope that still describes what you deleted or renamed, with `file:line`.

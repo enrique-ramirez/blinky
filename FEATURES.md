@@ -355,8 +355,8 @@ Every tick, for each repository:
 2. Applies your gates.
 3. Checks state. Same head SHA as the last review and no new comments → skip.
    This is the step that keeps quota spend near zero on a quiet repo.
-4. Fetches the diff, compresses it, and gathers the PR body, linked issues, and
-   existing review threads.
+4. Fetches the diff, compresses it, and gathers the PR body, the ticket it
+   answers to, and existing review threads.
 5. Calls the model **once**.
 6. Validates every proposed comment line against the real diff hunks, then posts.
 7. Resolves threads that no longer apply, and replies to threads the author has
@@ -412,6 +412,41 @@ before the cut, so a bot posting on every push cannot crowd the humans out of
 the twenty. A colleague's thread is real context and is sent whole; only the
 listed accounts collapse. This never makes the reviewer reply on a thread it did
 not start. It does make an approval wait on their open threads; see [Other people's threads](#other-peoples-threads).
+
+### Where the ticket lives
+
+The `spec` axis judges a pull request against what was asked for, and what was
+asked for lives in a tracker. Which tracker is a fact about the repository, so
+it is set per repo in the `tracker` block:
+
+| `type` | finds | needs |
+| --- | --- | --- |
+| `github` (default) | `#123` in the title or body; a closing keyword in the body comes first | nothing beyond the GitHub token |
+| `clickup` | `CU-<id>`, `#<id>`, `app.clickup.com/t/<id>` | `CLICKUP_TOKEN` in `.env` |
+| `jira` | `KEY-123` | `base_url` in the block, `JIRA_TOKEN` in `.env`, and `JIRA_EMAIL` beside it on Jira Cloud |
+| `none` | nothing | nothing; the axis judges against the description |
+
+`token_env` renames the variable the token is read from, and `email_env` does
+the same for Jira's email. The Jira default matches anything shaped like a key,
+`CVE-2024` included; a project-specific pattern such as `\b(DEV-\d+)\b` spends
+no requests on those.
+
+`patterns` replaces the type's defaults with your own: regular expressions with
+one capture group, the ticket id, tried in order over the title, then the branch
+name, then the body. A team whose branches are `feat/<id>_summary` and whose
+titles are `feat(<id>): …` lists one pattern for each, and the id is found
+whichever of the two the author remembered.
+
+The script fetches the ticket, not the model. It arrives in the prompt as text
+beside the diff, the model never holds a tracker token or reaches the network,
+and the token is stripped from the child environment along with GitHub's. Up to
+three tickets go in; `max_tickets` changes that.
+
+A pull request with no ticket is still reviewed. The summary says so, the
+`spec_verdict` is `no_ticket`, and the log names the tracker it looked with, so a
+wrong type or pattern shows up there. Only `none` looks nowhere and logs nothing. `./blinky.sh --check` reports the same thing
+before any review does: whether the token works, who it signs in as, and which
+ticket the probed pull request resolves to.
 
 ## Review outcomes
 
@@ -835,7 +870,7 @@ changes.
 | `config/repos.sample/` | yes | Sample repo configs |
 | `config/global.sample.json` | yes | Sample global config |
 | `config/.env.sample` | yes | Sample `.env`, and where the token permissions are written down |
-| `.env` | **no** | Your token |
+| `.env` | **no** | Your token, and a tracker token where a repo uses one |
 | `config/global.json` | **no** | Your global config |
 | `config/repos/*.json` | **no** | Your repo configs |
 | `config/repos/*.md` | **no** | Optional per-repo notes |

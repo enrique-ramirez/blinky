@@ -1,6 +1,6 @@
 # Build metrics NNN slug
 
-<!-- Written by the /build coordinator while it runs, one row per dispatch or check, as each one closes. Times are local wall clock. Tokens are what the harness reports when an agent finishes. A resumed agent reports its whole context, so its row takes the difference from its previous total and says so. -->
+<!-- Written by the /build coordinator while it runs, one row per dispatch or check, opened as it goes out and completed as it closes. Times are local wall clock from `date`. Tokens are what the harness reports when an agent finishes. A resumed agent reports its whole context, so its row takes the difference from its previous total and says so. -->
 
 Compared against: <!-- the last measured bundle in _done/, by its Totals table -->
 
@@ -20,7 +20,7 @@ Compared against: <!-- the last measured bundle in _done/, by its Totals table -
 
 ## Dispatches and checks
 
-<!-- kind: tests, build, style, reaper, audit, planner, check (your own), other. new: fresh, or resume of row N. Outcome: one line. accepted, bounced, stopped, died, and what caught it. -->
+<!-- kind: tests, build, style, reaper, audit, planner, check (your own), other. new: fresh, or resume of row N. Outcome: one line, first word accepted, bounced, stopped or died, then what caught it. Blank while the dispatch is out. -->
 
 | # | what | kind | lane | new | start | end | wall | tokens | tool uses | outcome |
 |---|---|---|---|---|---|---|---|---|---|---|

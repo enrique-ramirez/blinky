@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import log, providers
+from . import log, providers, tracker
 
 DEFAULT_API_URL = "https://api.github.com"
 DEFAULT_GRAPHQL_URL = "https://api.github.com/graphql"
@@ -103,6 +103,13 @@ REPO_DEFAULTS: dict[str, Any] = {
     # entry from the global "providers" list; every other key is layered over
     # that entry, so pinning just the model is one line.
     "model": {},
+    "tracker": {
+        "type": "github",
+        "patterns": [],
+        "token_env": None,
+        "base_url": None,
+        "max_tickets": 3,
+    },
     "gates": {
         "skip_drafts": True,
         "skip_own_prs": True,
@@ -473,6 +480,7 @@ class RepoConfig:
     approval: dict[str, Any]
     notify_on: list[str]
     source_file: Path
+    tracker: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(repr=False, default_factory=dict)
 
     @property
@@ -517,6 +525,11 @@ class RepoConfig:
         except (ConfigError, providers.ProviderError) as exc:
             raise ConfigError(f"{path}: {exc}") from exc
 
+        try:
+            tracker.check(data["tracker"])
+        except tracker.TrackerError as exc:
+            raise ConfigError(f"{path}: {exc}") from exc
+
         return cls(
             repo=repo,
             owner=owner,
@@ -533,6 +546,7 @@ class RepoConfig:
             approval=data["approval"],
             notify_on=list(data.get("notify_on") or []),
             source_file=path,
+            tracker=data["tracker"],
             raw=data,
         )
 

@@ -1,7 +1,7 @@
 ---
 name: build
 description: Build an approved spec bundle from `_todo/` by coordinating agents rather than writing the code. Groups the tasks, runs independent groups in parallel lanes, gets a failing test before each builder, verifies what comes back, and reviews each group's design as it lands. Use when someone says to build, implement or ship a spec.
-argument-hint: <n>|<slug> [task <n>]
+argument-hint: <n>|<slug> [task <n>] [--no-dashboard]
 ---
 
 # Build
@@ -23,7 +23,9 @@ An unapproved spec belongs to `/plan`. Uncommitted work already in the tree make
 
 Copy `templates/todo/build-metrics.md` into the bundle before the first dispatch. Time the profile's commands once, unless the profile gives their cost, and record them as the baseline: what a check costs decides where it runs, and a filter that skips running but not compiling saves nothing.
 
-Add a row as each dispatch or check closes: start, end, wall clock, the tokens and tool uses the harness reports, fresh or resumed, a one-line outcome. A resumed agent reports its whole context, so record the difference from its previous total. Your own checks get rows without tokens. Compare against the *Totals* and *Levers* of the last measured bundle in `_done/`. Fill in *Where it went* and *Levers* once the build closes.
+Open a row as each dispatch goes out, with its start from `date +%H:%M` and the rest blank, and complete it as the dispatch closes: end, wall clock, the tokens and tool uses the harness reports, fresh or resumed, a one-line outcome whose first word is `accepted`, `bounced`, `stopped` or `died`. A time from memory drifts by hours over a build. A resumed agent reports its whole context, so record the difference from its previous total. Your own checks get rows without tokens, written as they close. Compare against the *Totals* and *Levers* of the last measured bundle in `_done/`. Fill in *Where it went* and *Levers* once the build closes.
+
+Serve the progress page before the first dispatch, unless the owner passed `--no-dashboard`: run `build-dashboard.py` with the bundle's path in the background, from `.claude/bin/` in a copy install or `${CLAUDE_PLUGIN_ROOT}/bin/` in a plugin one. It prints a URL; put it in the message that says the layout back. If it fails to start, say so and carry on. The page reads the metrics file and `tasks.md`, shows an open row as running, and counts quiet from the newest write anywhere in the working tree, so a builder editing files far from the bundle keeps it moving.
 
 ## Groups and lanes
 
@@ -118,8 +120,9 @@ Fixes in different lanes go out together. After a fix round, re-run only the axe
 1. The audit, until nothing blocks.
 2. `style-reviewer` over the audit's fixes, if there were any.
 3. `comment-reaper` over the whole change, once, unless `git diff HEAD` adds no comment line. Tell it a comment-only edit runs nothing.
-4. The Green axis again, if anything changed code after the audit.
-5. `/plan done <n>`.
+4. A documentation pass over what the change deleted or renamed: grep every documentation file in the repository, the ones the diff never touched included, for each name and each mechanism, and hand `style-reviewer` the files that still describe it.
+5. The Green axis again, if anything changed code after the audit.
+6. `/plan done <n>`.
 
 A backgrounded long check keeps its whole output in a file.
 

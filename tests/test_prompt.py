@@ -104,7 +104,7 @@ class OtherReviewersInConversation(unittest.TestCase):
             snapshot=snapshot([]),
             pr_body="Tidy things.",
             bundle=_empty_bundle(),
-            issues=[],
+            tickets=[],
             discussion=[human, *bots],
             checkout_path=None,
             round_number=1,

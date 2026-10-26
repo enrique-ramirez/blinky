@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import clock, log, providers
+from . import clock, log, providers, tracker
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
@@ -366,7 +366,7 @@ class Spend:
 
 def _child_env() -> dict[str, str]:
     env = dict(os.environ)
-    for key in SENSITIVE_ENV:
+    for key in (*SENSITIVE_ENV, *tracker.SECRET_ENV):
         env.pop(key, None)
     return env
 

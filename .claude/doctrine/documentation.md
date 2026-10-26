@@ -48,6 +48,7 @@ The repository's profile names which of these files exist and what each holds. W
 5. **Nothing committed names `_todo`, `_done` or `_tmp`.** They are gitignored.
 6. **Third person.** No *I*, *we*, *you* in documentation. Where the reader has to act, the imperative carries it: *fill in the profile*.
 7. **Short.** Every surviving sentence was chosen over a name or a test.
+8. **A deletion or a rename is followed by a search.** Every documentation file is grepped for the name and for the words that describe the mechanism, and each sentence still describing it is fixed in the same change, whether or not the diff touched that file.
 
 Rule 6 governs documentation. Agent, skill and voice files are instructions, and address their reader directly.
 

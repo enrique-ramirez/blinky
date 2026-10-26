@@ -8,7 +8,6 @@ head SHA or an explicit re-review request buys a full pass.
 
 from __future__ import annotations
 
-import re
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
@@ -30,6 +29,7 @@ from . import (
     summarize,
     threads,
     tokens,
+    tracker,
     worktree,
 )
 from .config import DEFAULT_CONTEXT_PATHS, GlobalConfig, RepoConfig
@@ -38,11 +38,6 @@ from .gh.graphql import PRSnapshot, ReviewThread
 from .log import DebugSink
 from .state import Store
 
-ISSUE_REF_RE = re.compile(r"(?:^|\s)#(\d{1,6})\b")
-CLOSING_RE = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d{1,6})\b", re.IGNORECASE
-)
-MAX_LINKED_ISSUES = 3
 LOG_TITLE_CHARS = 160
 
 
@@ -778,27 +773,18 @@ class Reviewer:
         self._repo_context = context.files or None
         return self._repo_context
 
-    def _linked_issues(self, body: str, title: str) -> list[dict[str, Any]]:
-        numbers: list[int] = []
-        for match in CLOSING_RE.finditer(body):
-            numbers.append(int(match.group(1)))
-        for match in ISSUE_REF_RE.finditer(f"{title}\n{body}"):
-            numbers.append(int(match.group(1)))
-
-        seen: set[int] = set()
-        issues: list[dict[str, Any]] = []
-        for num in numbers:
-            if num in seen or len(issues) >= MAX_LINKED_ISSUES:
-                continue
-            seen.add(num)
-            try:
-                issue = self.rest.get_issue(self.cfg.owner, self.cfg.name, num)
-            except GitHubError:
-                continue
-            # An issue payload with pull_request set is another PR, not a ticket.
-            if issue and "pull_request" not in issue:
-                issues.append(issue)
-        return issues
+    def _linked_tickets(self, pull: dict[str, Any], title: str) -> list[tracker.Ticket]:
+        cfg = self.cfg
+        head = pull.get("head") if isinstance(pull.get("head"), dict) else {}
+        finder = tracker.build(
+            cfg, get_issue=lambda number: self.rest.get_issue(cfg.owner, cfg.name, number)
+        )
+        return finder.tickets(
+            label=f"{cfg.repo}#{pull.get('number')}",
+            title=title,
+            branch=str((head or {}).get("ref") or ""),
+            body=str(pull.get("body") or ""),
+        )
 
     def _handle_threads(
         self,
@@ -942,7 +928,7 @@ class Reviewer:
             return False
 
         axes = list(cfg.review.get("axes") or ["standards"])
-        issues = self._linked_issues(pr_body, snapshot.title) if "spec" in axes else []
+        tickets = self._linked_tickets(pull, snapshot.title) if "spec" in axes else []
 
         system = prompt.build_system(self.personality_dir, cfg, repo_context)
         user = prompt.build_review_user_prompt(
@@ -950,7 +936,7 @@ class Reviewer:
             snapshot=snapshot,
             pr_body=pr_body,
             bundle=bundle,
-            issues=issues,
+            tickets=tickets,
             discussion=discussion,
             checkout_path=checkout_path,
             round_number=pr_state_round,
@@ -971,7 +957,7 @@ class Reviewer:
                     snapshot=snapshot,
                     pr_body=pr_body,
                     bundle=bundle,
-                    issues=issues,
+                    tickets=tickets,
                     discussion=discussion,
                     checkout_path=checkout_path,
                     round_number=pr_state_round,

@@ -23,6 +23,7 @@ from . import log
 from .config import RepoConfig
 from .diff import DiffBundle, manifest_note, render as render_diff
 from .gh.graphql import PRSnapshot, ReviewThread
+from .tracker import Ticket
 
 CONTRACT_FILE = "90-output-contract"
 
@@ -208,19 +209,20 @@ def _thread_block(
     return "\n\n".join(entries)
 
 
-def _issue_block(issues: list[dict[str, Any]]) -> str:
-    if not issues:
+def _ticket_block(tickets: list[Ticket]) -> str:
+    if not tickets:
         return (
-            "No linked issue was found. Judge the spec axis against the PR "
+            "No linked ticket was found. Judge the spec axis against the PR "
             "description, and say plainly if the description is too thin to judge "
             "against."
         )
     blocks = []
-    for issue in issues:
-        body = (issue.get("body") or "").strip()
-        blocks.append(
-            f"#### Issue #{issue.get('number')}: {issue.get('title')}\n\n{body}"
-        )
+    for ticket in tickets:
+        meta = " · ".join(part for part in (ticket.status, ticket.url) if part)
+        header = f"#### {ticket.label} {ticket.key}: {ticket.title}"
+        if meta:
+            header += f"\n{meta}"
+        blocks.append(f"{header}\n\n{ticket.body or '(no description)'}")
     return "\n\n".join(blocks)
 
 
@@ -301,7 +303,7 @@ def build_review_user_prompt(
     snapshot: PRSnapshot,
     pr_body: str,
     bundle: DiffBundle,
-    issues: list[dict[str, Any]],
+    tickets: list[Ticket],
     discussion: list[dict[str, Any]],
     checkout_path: Path | None,
     round_number: int,
@@ -327,7 +329,7 @@ def build_review_user_prompt(
     sections.append(f"## PR description\n\n{pr_body.strip() or '(empty)'}")
 
     if "spec" in axes:
-        sections.append(f"## Linked issues\n\n{_issue_block(issues)}")
+        sections.append(f"## Linked tickets\n\n{_ticket_block(tickets)}")
 
     # Another reviewer's PR-level comments are walkthroughs and summaries, not
     # context the review needs. Filtered before the cut so that a bot posting on
