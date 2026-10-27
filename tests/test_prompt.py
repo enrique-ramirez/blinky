@@ -79,9 +79,9 @@ class OtherReviewersInThreads(unittest.TestCase):
         self.assertNotIn("another reviewer", block)
 
     def test_bot_suffix_does_not_matter_on_either_side(self) -> None:
-        cfg = repo_config(review={"other_reviewers": ["collectors-oppo"]})
-        self.assertTrue(prompt.is_other_reviewer("collectors-oppo[bot]", cfg))
-        self.assertTrue(prompt.is_other_reviewer("Collectors-Oppo", cfg))
+        cfg = repo_config(review={"other_reviewers": ["acme-linter"]})
+        self.assertTrue(prompt.is_other_reviewer("acme-linter[bot]", cfg))
+        self.assertTrue(prompt.is_other_reviewer("Acme-Linter", cfg))
         self.assertFalse(prompt.is_other_reviewer("alice", cfg))
 
     def test_nothing_changes_when_the_list_is_empty(self) -> None:

@@ -85,7 +85,9 @@
       "Exact check-run names to disregard when deciding CI is green. Use for",
       "optional or flaky checks that are not required to merge. The 'approving",
       "review required' rule is a branch-protection setting, not a check run, so",
-      "it never appears here and never blocks the reviewer."
+      "it never appears here and never blocks the reviewer. A workflow that",
+      "failed at startup never produced a check run and is already treated as",
+      "absent, so it does not need listing either."
     ],
     "treat_neutral_as_pass": true,
     "treat_skipped_as_pass": true,

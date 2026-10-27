@@ -837,6 +837,8 @@ them reaches anything, every PR is skipped with a message saying so,
 deliberately, since a reviewer that cannot see CI would otherwise approve pull
 requests with failing builds. `gates.require_ci_green: false` opts out of that.
 
+A workflow run that fails at startup (a broken trigger, a token missing a permission the workflow asks for, unparseable YAML) never creates a check run, so the pull request page does not show it and the merge button does not wait for it. The Actions runs list still carries it. The reviewer treats such a run as absent rather than failed, whichever source it came from, so the answer matches the one the pull request page gives.
+
 `Code quality` sounds relevant and is not: it reads findings from GitHub's paid
 Code Quality product, and covers neither CI results nor approvals. Leave it off.
 

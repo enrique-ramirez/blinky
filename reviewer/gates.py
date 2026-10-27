@@ -18,6 +18,12 @@ from .state import PRState
 PASSING_CONCLUSIONS = {"SUCCESS"}
 PENDING_STATUSES = {"QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED"}
 
+# A workflow run that died before its first job (bad trigger, missing
+# permission, unparseable YAML) never creates a check run, so the pull request
+# page and the merge button do not show it. Only the Actions runs list does.
+# It is not a verdict on the code, which was never looked at.
+NEVER_STARTED_CONCLUSIONS = {"STARTUP_FAILURE"}
+
 
 @dataclass
 class Decision:
@@ -43,6 +49,9 @@ def ci_status(snapshot: PRSnapshot, cfg: RepoConfig) -> tuple[str, list[str]]:
     The rollup covers check runs and commit statuses. Branch-protection rules
     (including "an approving review is required") are not check runs and never
     appear here, so waiting on CI never means waiting on ourselves.
+
+    Every source reduces the same way, so a run that never started is dropped
+    here rather than in the one source that happens to surface it.
     """
     gates = cfg.gates
 
@@ -70,7 +79,7 @@ def ci_status(snapshot: PRSnapshot, cfg: RepoConfig) -> tuple[str, list[str]]:
 
         if status in PENDING_STATUSES or (not conclusion and status != "COMPLETED"):
             pending.append(name)
-        elif conclusion in passing:
+        elif conclusion in passing or conclusion in NEVER_STARTED_CONCLUSIONS:
             continue
         else:
             failing.append(f"{name}={conclusion or status or 'UNKNOWN'}")
